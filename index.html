@@ -423,14 +423,30 @@ function HybridTracker() {
  
   const saveDaily = () => {
     const id = `daily:${dailyForm.date}`;
-    const data = {
-      id, ...dailyForm,
-      weight: dailyForm.weight ? parseFloat(dailyForm.weight.toString().replace(',', '.')) : null,
-      kcal: dailyForm.kcal ? parseInt(dailyForm.kcal) : null,
-      protein: dailyForm.protein ? parseInt(dailyForm.protein) : null,
-      sleep: dailyForm.sleep ? parseFloat(dailyForm.sleep.toString().replace(',', '.')) : null,
-      stress: parseInt(dailyForm.stress)
+    // Bestehenden Eintrag für dieses Datum finden (falls vorhanden)
+    const existing = dailyLogs.find(d => d.date === dailyForm.date);
+ 
+    // Neue Werte aus dem Formular - nur die, die der User auch eingegeben hat
+    // Leeres Feld → behalte alten Wert (oder null wenn neu)
+    const newValues = {
+      weight:  dailyForm.weight  !== '' ? parseFloat(dailyForm.weight.toString().replace(',', '.'))  : (existing?.weight  ?? null),
+      kcal:    dailyForm.kcal    !== '' ? parseInt(dailyForm.kcal)                                   : (existing?.kcal    ?? null),
+      protein: dailyForm.protein !== '' ? parseInt(dailyForm.protein)                                : (existing?.protein ?? null),
+      sleep:   dailyForm.sleep   !== '' ? parseFloat(dailyForm.sleep.toString().replace(',', '.'))   : (existing?.sleep   ?? null),
+      // Stress hat einen Default (5). Beim Bearbeiten: alten Wert behalten wenn Slider nicht bewegt.
+      // Beim neuen Eintrag: aktuellen Slider-Wert nehmen.
+      stress:  existing && dailyForm.stress === 5 && existing.stress !== 5 ? existing.stress : parseInt(dailyForm.stress)
     };
+ 
+    // Validierung: mindestens ein Wert muss gesetzt sein (entweder bestehend oder neu)
+    const hasAnyValue = newValues.weight !== null || newValues.kcal !== null ||
+                        newValues.protein !== null || newValues.sleep !== null;
+    if (!hasAnyValue && !existing) {
+      alert('Bitte mindestens einen Wert eingeben');
+      return;
+    }
+ 
+    const data = { id, date: dailyForm.date, ...newValues };
     storage.set(id, JSON.stringify(data));
     const filtered = dailyLogs.filter(d => d.date !== dailyForm.date);
     setDailyLogs([...filtered, data].sort((a, b) => new Date(a.date) - new Date(b.date)));
@@ -1049,6 +1065,27 @@ function HybridTracker() {
               <h2 className="text-base font-bold mb-3 flex items-center gap-2">
                 <I name="plus" className="w-4 h-4 text-orange-500" /> {editingDailyId ? 'Bearbeiten' : 'Tageswerte'}
               </h2>
+              {(() => {
+                const existing = dailyLogs.find(d => d.date === dailyForm.date);
+                if (!existing) return null;
+                const filled = [];
+                if (existing.weight) filled.push(`${existing.weight}kg`);
+                if (existing.kcal) filled.push(`${existing.kcal} kcal`);
+                if (existing.protein) filled.push(`${existing.protein}g Protein`);
+                if (existing.sleep) filled.push(`${existing.sleep}h Schlaf`);
+                if (filled.length === 0) return null;
+                return (
+                  <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3 mb-3 text-xs">
+                    <div className="flex items-start gap-2">
+                      <I name="info" className="w-3.5 h-3.5 text-blue-400 mt-0.5 flex-shrink-0" />
+                      <div className="text-blue-200">
+                        <span className="font-semibold">Bereits gespeichert für {dailyForm.date}:</span> {filled.join(' · ')}
+                        <div className="text-zinc-400 mt-1">Leere Felder bleiben unverändert – du kannst gezielt einzelne Werte ergänzen.</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="space-y-3">
                 <FormField label="Datum">
                   <input type="date" value={dailyForm.date} onChange={e => setDailyForm({...dailyForm, date: e.target.value})}
@@ -1252,7 +1289,7 @@ function HybridTracker() {
       )}
  
       <footer className="border-t border-zinc-800 mt-8 py-4 text-center text-xs text-zinc-600" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
-        Hybrid Tracker v2.2 · Daten lokal in Safari
+        Hybrid Tracker v2.3 · Daten lokal in Safari
       </footer>
     </div>
   );
