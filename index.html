@@ -8,43 +8,30 @@
 <meta name="apple-mobile-web-app-title" content="Hybrid Tracker" />
 <meta name="theme-color" content="#09090b" />
 <title>Hybrid Tracker</title>
-
-<!-- Tailwind CSS -->
 <script src="https://cdn.tailwindcss.com"></script>
-
-<!-- React + ReactDOM -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-
-<!-- Recharts -->
 <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
 <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
-
-<!-- Babel zum JSX-Transpilieren im Browser -->
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
 <style>
   html, body {
-    background: #09090b;
-    color: #f4f4f5;
-    margin: 0;
-    padding: 0;
+    background: #09090b; color: #f4f4f5; margin: 0; padding: 0;
     -webkit-tap-highlight-color: transparent;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     overscroll-behavior: none;
   }
   * { -webkit-touch-callout: none; }
-  input, textarea, select { font-size: 16px !important; } /* iOS-Zoom verhindern */
+  input, textarea, select { font-size: 16px !important; }
 </style>
 </head>
 <body>
 <div id="root"></div>
-
+ 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef } = React;
 const { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } = Recharts;
-
-// Inline-SVG-Icons (statt lucide-react, das hier nicht ladbar ist)
+ 
 const Icon = ({ d, className = "w-5 h-5", strokeWidth = 2 }) => (
   <svg className={className} fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
     <g dangerouslySetInnerHTML={{ __html: d }} />
@@ -58,8 +45,6 @@ const ICONS = {
   plus:      '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   trash:     '<polyline points="3 6 5 6 21 6"/><path d="m19 6-2 14H7L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
   target:    '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
-  moon:      '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
-  flame:     '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
   scale:     '<path d="M2 9.5h20"/><path d="M5 9.5 7 6h10l2 3.5"/><path d="M3 9.5v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8"/><circle cx="12" cy="14" r="2"/>',
   info:      '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
   pencil:    '<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
@@ -68,10 +53,8 @@ const ICONS = {
   save:      '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/>'
 };
 const I = ({ name, ...props }) => <Icon d={ICONS[name]} {...props} />;
-
-// ============================================
-// localStorage-Wrapper (Ersatz für window.storage)
-// ============================================
+ 
+// localStorage-Wrapper
 const storage = {
   set: (key, value) => { try { localStorage.setItem(key, value); } catch (e) {} },
   get: (key) => { const v = localStorage.getItem(key); return v ? { value: v } : null; },
@@ -85,10 +68,40 @@ const storage = {
     return { keys };
   }
 };
-
+ 
 // ============================================
-// PACE-FAKTOREN
+// ZEIT-FORMAT HELFER (mm:ss <-> Dezimalminuten)
 // ============================================
+// "25:30" -> 25.5 (Minuten als Dezimalzahl)
+const parseTime = (str) => {
+  if (!str) return null;
+  const s = str.toString().trim();
+  if (s.includes(':')) {
+    const parts = s.split(':');
+    const min = parseInt(parts[0]) || 0;
+    const sec = parseInt(parts[1]) || 0;
+    return min + sec / 60;
+  }
+  // Fallback: reine Zahl als Minuten
+  const num = parseFloat(s.replace(',', '.'));
+  return isNaN(num) ? null : num;
+};
+ 
+// 25.5 -> "25:30"
+const formatMinutesToTime = (minutes) => {
+  if (minutes === null || minutes === undefined || minutes === '') return '';
+  const min = Math.floor(minutes);
+  const sec = Math.round((minutes - min) * 60);
+  return `${min}:${sec.toString().padStart(2, '0')}`;
+};
+ 
+// Live-Validierung beim Tippen
+const isValidTimeInput = (str) => {
+  if (!str) return true;
+  // Erlaubt: Zahlen + max ein Doppelpunkt
+  return /^\d{0,3}(:\d{0,2})?$/.test(str);
+};
+ 
 const PACE_FACTORS = {
   GA1:       { min: 1.20, max: 1.35, name: 'GA1 (locker)',  desc: 'Lockeres Tempo, Unterhaltung in vollen Sätzen möglich. ~75-85% Maximalpuls.', tip: 'Anfangs fühlt sich das zu langsam an – genau richtig!' },
   GA2:       { min: 1.10, max: 1.20, name: 'GA2 (zügig)',   desc: 'Zügig, aber kontrollierbar. Sprechen nur in kurzen Sätzen.', tip: 'Achtung: Diese Zone wird oft überstrapaziert (Junk Mileage).' },
@@ -101,7 +114,7 @@ const getPaceRange = (best5kMin, type) => {
   const f = PACE_FACTORS[type];
   return { minPace: basePace * f.min, maxPace: basePace * f.max, name: f.name, desc: f.desc, tip: f.tip };
 };
-
+ 
 const DEFAULT_WEEKLY_PLAN = [
   { day: 'Mo', session: 'Kraft UK',         detail: 'Beine + Core',      splitType: 'UK',   color: 'orange' },
   { day: 'Di', session: 'Lauf locker',      detail: 'GA1, 40-50 min',    splitType: null,   color: 'green'  },
@@ -111,7 +124,17 @@ const DEFAULT_WEEKLY_PLAN = [
   { day: 'Sa', session: 'Lauf Qualität',    detail: 'Intervalle/Tempo',  splitType: null,   color: 'red'    },
   { day: 'So', session: 'Pause',            detail: 'Familie',           splitType: null,   color: 'gray'   }
 ];
-
+ 
+// ============================================
+// SPLIT-DEFINITIONEN (editierbar!)
+// ============================================
+// Statt fester Konstante UK/OK/Full → Liste von Split-Objekten
+const DEFAULT_SPLITS = [
+  { id: 'UK',   name: 'Unterkörper',  shortName: 'UK',   color: 'blue' },
+  { id: 'OK',   name: 'Oberkörper',   shortName: 'OK',   color: 'purple' },
+  { id: 'Full', name: 'Ganzkörper',   shortName: 'GK',   color: 'green' }
+];
+ 
 const DEFAULT_EXERCISES = {
   UK: [
     { name: 'Kniebeuge',                  sets: 4, repsTarget: '5-8',     rirTarget: 2 },
@@ -132,7 +155,18 @@ const DEFAULT_EXERCISES = {
   ],
   Full: []
 };
-
+ 
+const SPLIT_COLORS = {
+  blue:   'bg-blue-500/20 text-blue-400',
+  purple: 'bg-purple-500/20 text-purple-400',
+  green:  'bg-green-500/20 text-green-400',
+  orange: 'bg-orange-500/20 text-orange-400',
+  red:    'bg-red-500/20 text-red-400',
+  pink:   'bg-pink-500/20 text-pink-400',
+  yellow: 'bg-yellow-500/20 text-yellow-400',
+  zinc:   'bg-zinc-600/40 text-zinc-300'
+};
+ 
 function HybridTracker() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [runs, setRuns] = useState([]);
@@ -141,32 +175,103 @@ function HybridTracker() {
   const [loading, setLoading] = useState(true);
   const [best5kTime, setBest5kTime] = useState(25);
   const [weeklyPlan, setWeeklyPlan] = useState(DEFAULT_WEEKLY_PLAN);
+  const [splits, setSplits] = useState(DEFAULT_SPLITS);
   const [exercises, setExercises] = useState(DEFAULT_EXERCISES);
   const [editingRunId, setEditingRunId] = useState(null);
   const [editingStrengthId, setEditingStrengthId] = useState(null);
   const [editingDailyId, setEditingDailyId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [editingExerciseSplit, setEditingExerciseSplit] = useState(null);
-
-  const [runForm, setRunForm] = useState({ date: new Date().toISOString().split('T')[0], type: 'GA1', distance: '', duration: '', notes: '' });
-  const [strengthForm, setStrengthForm] = useState({ date: new Date().toISOString().split('T')[0], type: 'UK', exerciseLog: [], notes: '' });
-  const [dailyForm, setDailyForm] = useState({ date: new Date().toISOString().split('T')[0], weight: '', kcal: '', protein: '', sleep: '', stress: 5 });
-
+ 
+  // Refs zur Steuerung des Template-Resets
+  // Idee: Template wird NUR geladen wenn der User aktiv den Split wechselt
+  // oder die App neu öffnet - NIE während Edit/Eingabe
+  const previousSplitType = useRef(null);
+  const isInitialLoad = useRef(true);
+ 
+  const [runForm, setRunForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    type: 'GA1',
+    distance: '',
+    durationStr: '', // jetzt String im mm:ss-Format
+    notes: ''
+  });
+ 
+  const [strengthForm, setStrengthForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    type: 'UK',
+    exerciseLog: [],
+    notes: ''
+  });
+ 
+  const [dailyForm, setDailyForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    weight: '', kcal: '', protein: '', sleep: '', stress: 5
+  });
+ 
   useEffect(() => { loadAllData(); }, []);
-
+ 
+  // ============================================
+  // TEMPLATE-LOGIK NEU:
+  // Template wird nur geladen wenn:
+  // 1. Initial nach App-Start (wenn kein Edit)
+  // 2. User aktiv den Split wechselt (vorheriger Split != aktueller Split)
+  // NIE wenn editingStrengthId gesetzt ist
+  // NIE wenn exerciseLog bereits gefüllt ist und Split gleich bleibt
+  // ============================================
+  useEffect(() => {
+    if (editingStrengthId) {
+      // Im Edit-Modus: Template NIEMALS laden
+      previousSplitType.current = strengthForm.type;
+      return;
+    }
+ 
+    const splitChanged = previousSplitType.current !== null &&
+                         previousSplitType.current !== strengthForm.type;
+ 
+    // Template laden bei: erstem Lauf ODER Split-Wechsel
+    if (isInitialLoad.current || splitChanged) {
+      const template = exercises[strengthForm.type] || [];
+      const exerciseLog = template.map(ex => ({
+        name: ex.name,
+        plannedSets: ex.sets,
+        repsTarget: ex.repsTarget,
+        rirTarget: ex.rirTarget,
+        sets: Array.from({ length: ex.sets }, () => ({
+          reps: '', weight: '',
+          rir: ex.rirTarget !== undefined && ex.rirTarget !== null ? ex.rirTarget.toString() : ''
+        }))
+      }));
+      setStrengthForm(f => ({ ...f, exerciseLog }));
+      isInitialLoad.current = false;
+    }
+ 
+    previousSplitType.current = strengthForm.type;
+  }, [strengthForm.type, editingStrengthId]);
+ 
+  // Wenn exercises-Templates aktualisiert werden (User editiert Vorlagen),
+  // aktualisiere die strengthForm NUR wenn keine Werte eingetragen sind und kein Edit
   useEffect(() => {
     if (editingStrengthId) return;
+    const hasAnyValues = strengthForm.exerciseLog.some(ex =>
+      ex.sets.some(s => s.weight !== '' || s.reps !== '')
+    );
+    if (hasAnyValues) return; // Werte schon drin - nicht überschreiben!
+ 
     const template = exercises[strengthForm.type] || [];
     const exerciseLog = template.map(ex => ({
-      name: ex.name, plannedSets: ex.sets, repsTarget: ex.repsTarget, rirTarget: ex.rirTarget,
+      name: ex.name,
+      plannedSets: ex.sets,
+      repsTarget: ex.repsTarget,
+      rirTarget: ex.rirTarget,
       sets: Array.from({ length: ex.sets }, () => ({
         reps: '', weight: '',
         rir: ex.rirTarget !== undefined && ex.rirTarget !== null ? ex.rirTarget.toString() : ''
       }))
     }));
     setStrengthForm(f => ({ ...f, exerciseLog }));
-  }, [strengthForm.type, exercises, editingStrengthId]);
-
+  }, [exercises]);
+ 
   const loadAllData = () => {
     try {
       const runsData = loadByPrefix('runs:');
@@ -179,12 +284,13 @@ function HybridTracker() {
       if (config) {
         if (config.best5kTime) setBest5kTime(config.best5kTime);
         if (config.weeklyPlan) setWeeklyPlan(config.weeklyPlan);
+        if (config.splits) setSplits(config.splits);
         if (config.exercises) setExercises(config.exercises);
       }
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
-
+ 
   const loadByPrefix = (prefix) => {
     const result = storage.list(prefix);
     if (!result || !result.keys) return [];
@@ -195,40 +301,65 @@ function HybridTracker() {
     }
     return items;
   };
-
+ 
   const loadConfig = () => {
     const result = storage.get('config:settings');
     return result ? JSON.parse(result.value) : null;
   };
-
+ 
   const saveConfig = (newConfig) => {
     const current = loadConfig() || {};
     const merged = { ...current, ...newConfig };
     storage.set('config:settings', JSON.stringify(merged));
   };
-
+ 
+  // ============================================
+  // LAUF: Speichern mit mm:ss-Parsing
+  // ============================================
   const saveRun = () => {
-    if (!runForm.distance || !runForm.duration) { alert('Bitte Distanz und Zeit eingeben'); return; }
+    if (!runForm.distance || !runForm.durationStr) {
+      alert('Bitte Distanz und Zeit eingeben');
+      return;
+    }
+    const durationMin = parseTime(runForm.durationStr);
+    if (durationMin === null || durationMin <= 0) {
+      alert('Zeit ungültig. Format: mm:ss (z.B. 25:30)');
+      return;
+    }
     const id = editingRunId || `runs:${Date.now()}`;
-    const data = { id, ...runForm, distance: parseFloat(runForm.distance), duration: parseFloat(runForm.duration) };
+    const data = {
+      id, ...runForm,
+      distance: parseFloat(runForm.distance.toString().replace(',', '.')),
+      duration: durationMin
+    };
+    delete data.durationStr;
     storage.set(id, JSON.stringify(data));
     const filtered = runs.filter(r => r.id !== id);
     setRuns([...filtered, data].sort((a, b) => new Date(a.date) - new Date(b.date)));
-    setRunForm({ date: new Date().toISOString().split('T')[0], type: 'GA1', distance: '', duration: '', notes: '' });
+    setRunForm({ date: new Date().toISOString().split('T')[0], type: 'GA1', distance: '', durationStr: '', notes: '' });
     setEditingRunId(null);
   };
-
+ 
   const startEditRun = (run) => {
-    setRunForm({ date: run.date, type: run.type, distance: run.distance.toString(), duration: run.duration.toString(), notes: run.notes || '' });
+    setRunForm({
+      date: run.date,
+      type: run.type,
+      distance: run.distance.toString(),
+      durationStr: formatMinutesToTime(run.duration), // mm:ss zurückkonvertieren
+      notes: run.notes || ''
+    });
     setEditingRunId(run.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-
+ 
   const cancelEditRun = () => {
-    setRunForm({ date: new Date().toISOString().split('T')[0], type: 'GA1', distance: '', duration: '', notes: '' });
+    setRunForm({ date: new Date().toISOString().split('T')[0], type: 'GA1', distance: '', durationStr: '', notes: '' });
     setEditingRunId(null);
   };
-
+ 
+  // ============================================
+  // KRAFT: Speichern
+  // ============================================
   const saveStrength = () => {
     const hasAnyData = strengthForm.exerciseLog.some(ex => ex.sets.some(s => s.weight !== '' || s.reps !== ''));
     if (!hasAnyData) { alert('Bitte mindestens einen Satz ausfüllen'); return; }
@@ -237,26 +368,31 @@ function HybridTracker() {
     storage.set(id, JSON.stringify(data));
     const filtered = strengthSessions.filter(s => s.id !== id);
     setStrengthSessions([...filtered, data].sort((a, b) => new Date(a.date) - new Date(b.date)));
-    const template = exercises[strengthForm.type] || [];
-    const fresh = template.map(ex => ({
-      name: ex.name, plannedSets: ex.sets, repsTarget: ex.repsTarget, rirTarget: ex.rirTarget,
-      sets: Array.from({ length: ex.sets }, () => ({ reps: '', weight: '', rir: ex.rirTarget != null ? ex.rirTarget.toString() : '' }))
-    }));
-    setStrengthForm({ date: new Date().toISOString().split('T')[0], type: 'UK', exerciseLog: fresh, notes: '' });
+    // Reset: Template laden für nächste Einheit
+    isInitialLoad.current = true;
+    setStrengthForm({ date: new Date().toISOString().split('T')[0], type: 'UK', exerciseLog: [], notes: '' });
     setEditingStrengthId(null);
   };
-
+ 
   const startEditStrength = (session) => {
-    setStrengthForm({ date: session.date, type: session.type, exerciseLog: session.exerciseLog || [], notes: session.notes || '' });
+    // Template-Reset blockieren - gespeicherte Werte laden
+    previousSplitType.current = session.type;
+    setStrengthForm({
+      date: session.date,
+      type: session.type,
+      exerciseLog: JSON.parse(JSON.stringify(session.exerciseLog || [])), // Deep copy
+      notes: session.notes || ''
+    });
     setEditingStrengthId(session.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-
+ 
   const cancelEditStrength = () => {
     setEditingStrengthId(null);
-    setStrengthForm(f => ({ ...f, date: new Date().toISOString().split('T')[0], notes: '' }));
+    isInitialLoad.current = true; // Template neu laden
+    setStrengthForm({ date: new Date().toISOString().split('T')[0], type: 'UK', exerciseLog: [], notes: '' });
   };
-
+ 
   const updateSet = (exIdx, setIdx, field, value) => {
     setStrengthForm(f => {
       const newLog = [...f.exerciseLog];
@@ -266,7 +402,7 @@ function HybridTracker() {
       return { ...f, exerciseLog: newLog };
     });
   };
-
+ 
   const addSet = (exIdx) => {
     setStrengthForm(f => {
       const newLog = [...f.exerciseLog];
@@ -275,7 +411,7 @@ function HybridTracker() {
       return { ...f, exerciseLog: newLog };
     });
   };
-
+ 
   const removeSet = (exIdx, setIdx) => {
     setStrengthForm(f => {
       const newLog = [...f.exerciseLog];
@@ -284,15 +420,15 @@ function HybridTracker() {
       return { ...f, exerciseLog: newLog };
     });
   };
-
+ 
   const saveDaily = () => {
     const id = `daily:${dailyForm.date}`;
     const data = {
       id, ...dailyForm,
-      weight: dailyForm.weight ? parseFloat(dailyForm.weight) : null,
+      weight: dailyForm.weight ? parseFloat(dailyForm.weight.toString().replace(',', '.')) : null,
       kcal: dailyForm.kcal ? parseInt(dailyForm.kcal) : null,
       protein: dailyForm.protein ? parseInt(dailyForm.protein) : null,
-      sleep: dailyForm.sleep ? parseFloat(dailyForm.sleep) : null,
+      sleep: dailyForm.sleep ? parseFloat(dailyForm.sleep.toString().replace(',', '.')) : null,
       stress: parseInt(dailyForm.stress)
     };
     storage.set(id, JSON.stringify(data));
@@ -301,7 +437,7 @@ function HybridTracker() {
     setDailyForm({ date: new Date().toISOString().split('T')[0], weight: '', kcal: '', protein: '', sleep: '', stress: 5 });
     setEditingDailyId(null);
   };
-
+ 
   const startEditDaily = (log) => {
     setDailyForm({
       date: log.date,
@@ -314,12 +450,12 @@ function HybridTracker() {
     setEditingDailyId(log.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-
+ 
   const cancelEditDaily = () => {
     setDailyForm({ date: new Date().toISOString().split('T')[0], weight: '', kcal: '', protein: '', sleep: '', stress: 5 });
     setEditingDailyId(null);
   };
-
+ 
   const deleteItem = (id, type) => {
     if (!confirm('Wirklich löschen?')) return;
     storage.delete(id);
@@ -327,14 +463,66 @@ function HybridTracker() {
     if (type === 'strength') setStrengthSessions(strengthSessions.filter(s => s.id !== id));
     if (type === 'daily') setDailyLogs(dailyLogs.filter(d => d.id !== id));
   };
-
+ 
   const updatePlanDay = (idx, field, value) => {
     const newPlan = [...weeklyPlan];
     newPlan[idx] = { ...newPlan[idx], [field]: value };
     setWeeklyPlan(newPlan);
     saveConfig({ weeklyPlan: newPlan });
   };
-
+ 
+  // ============================================
+  // SPLIT-VERWALTUNG (neue Splits anlegen/löschen)
+  // ============================================
+  const addSplit = () => {
+    const name = prompt('Name des neuen Splits (z.B. "Push", "Pull", "Beine"):');
+    if (!name || !name.trim()) return;
+    // ID generieren (alphanumerisch, basierend auf Namen)
+    const id = name.trim().replace(/[^a-zA-Z0-9]/g, '').toUpperCase() || `S${Date.now()}`;
+    if (splits.some(s => s.id === id)) {
+      alert('Ein Split mit ähnlichem Namen existiert bereits.');
+      return;
+    }
+    const colors = ['blue', 'purple', 'green', 'orange', 'red', 'pink', 'yellow'];
+    const usedColors = splits.map(s => s.color);
+    const newColor = colors.find(c => !usedColors.includes(c)) || 'zinc';
+    const newSplit = { id, name: name.trim(), shortName: name.trim().slice(0, 3), color: newColor };
+    const newSplits = [...splits, newSplit];
+    const newExercises = { ...exercises, [id]: [] };
+    setSplits(newSplits);
+    setExercises(newExercises);
+    saveConfig({ splits: newSplits, exercises: newExercises });
+    setEditingExerciseSplit(id); // direkt zur Bearbeitung springen
+  };
+ 
+  const renameSplit = (splitId) => {
+    const split = splits.find(s => s.id === splitId);
+    if (!split) return;
+    const newName = prompt('Neuer Name:', split.name);
+    if (!newName || !newName.trim()) return;
+    const newSplits = splits.map(s => s.id === splitId ? { ...s, name: newName.trim(), shortName: newName.trim().slice(0, 3) } : s);
+    setSplits(newSplits);
+    saveConfig({ splits: newSplits });
+  };
+ 
+  const removeSplit = (splitId) => {
+    if (splits.length <= 1) { alert('Mindestens ein Split muss bleiben.'); return; }
+    const split = splits.find(s => s.id === splitId);
+    if (!confirm(`Split "${split.name}" und alle zugehörigen Übungsvorlagen löschen? Bereits gespeicherte Krafteinheiten bleiben erhalten.`)) return;
+    const newSplits = splits.filter(s => s.id !== splitId);
+    const newExercises = { ...exercises };
+    delete newExercises[splitId];
+    setSplits(newSplits);
+    setExercises(newExercises);
+    saveConfig({ splits: newSplits, exercises: newExercises });
+    if (editingExerciseSplit === splitId) setEditingExerciseSplit(null);
+    // Falls aktueller Form-Split gelöscht → auf ersten verfügbaren wechseln
+    if (strengthForm.type === splitId) {
+      isInitialLoad.current = true;
+      setStrengthForm(f => ({ ...f, type: newSplits[0].id }));
+    }
+  };
+ 
   const updateExercise = (split, idx, field, value) => {
     const newList = [...(exercises[split] || [])];
     let parsedValue = value;
@@ -344,14 +532,14 @@ function HybridTracker() {
     setExercises(newExercises);
     saveConfig({ exercises: newExercises });
   };
-
+ 
   const addExercise = (split) => {
     const newList = [...(exercises[split] || []), { name: 'Neue Übung', sets: 3, repsTarget: '8-10', rirTarget: 2 }];
     const newExercises = { ...exercises, [split]: newList };
     setExercises(newExercises);
     saveConfig({ exercises: newExercises });
   };
-
+ 
   const removeExercise = (split, idx) => {
     if (!confirm('Übung aus Vorlage entfernen?')) return;
     const newList = (exercises[split] || []).filter((_, i) => i !== idx);
@@ -359,7 +547,7 @@ function HybridTracker() {
     setExercises(newExercises);
     saveConfig({ exercises: newExercises });
   };
-
+ 
   const moveExercise = (split, idx, direction) => {
     const newList = [...(exercises[split] || [])];
     const targetIdx = idx + direction;
@@ -369,13 +557,12 @@ function HybridTracker() {
     setExercises(newExercises);
     saveConfig({ exercises: newExercises });
   };
-
+ 
   const update5kTime = (newTime) => {
     setBest5kTime(newTime);
     saveConfig({ best5kTime: newTime });
   };
-
-  // Daten-Export/Import
+ 
   const exportData = () => {
     const data = {
       runs: loadByPrefix('runs:'),
@@ -392,7 +579,7 @@ function HybridTracker() {
     a.click();
     URL.revokeObjectURL(url);
   };
-
+ 
   const importData = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -401,11 +588,9 @@ function HybridTracker() {
       try {
         const data = JSON.parse(e.target.result);
         if (!confirm('Bestehende Daten werden überschrieben. Fortfahren?')) return;
-        // Alte Daten entfernen
         ['runs:', 'strength:', 'daily:'].forEach(prefix => {
           loadByPrefix(prefix).forEach(item => storage.delete(item.id));
         });
-        // Neue Daten importieren
         (data.runs || []).forEach(r => storage.set(r.id, JSON.stringify(r)));
         (data.strength || []).forEach(s => storage.set(s.id, JSON.stringify(s)));
         (data.daily || []).forEach(d => storage.set(d.id, JSON.stringify(d)));
@@ -418,7 +603,7 @@ function HybridTracker() {
     };
     reader.readAsText(file);
   };
-
+ 
   const calculatePace = (distance, duration) => !distance || !duration ? 0 : duration / distance;
   const formatPace = (pace) => {
     if (!pace) return '–';
@@ -426,15 +611,14 @@ function HybridTracker() {
     const sec = Math.round((pace - min) * 60);
     return `${min}:${sec.toString().padStart(2, '0')}`;
   };
-  const formatTime = (minutes) => {
-    if (!minutes) return '–';
-    const min = Math.floor(minutes);
-    const sec = Math.round((minutes - min) * 60);
-    return `${min}:${sec.toString().padStart(2, '0')}`;
-  };
-
-  const runChartData = runs.map(r => ({ date: r.date, pace: parseFloat(calculatePace(r.distance, r.duration).toFixed(2)), distance: r.distance, type: r.type }));
-
+  const formatTime = formatMinutesToTime;
+ 
+  const runChartData = runs.map(r => ({
+    date: r.date,
+    pace: parseFloat(calculatePace(r.distance, r.duration).toFixed(2)),
+    distance: r.distance, type: r.type
+  }));
+ 
   const getWeekNumber = (date) => {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
     const dayNum = d.getUTCDay() || 7;
@@ -442,7 +626,7 @@ function HybridTracker() {
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   };
-
+ 
   const getWeeklyKm = () => {
     const weeks = {};
     runs.forEach(r => {
@@ -452,11 +636,11 @@ function HybridTracker() {
     });
     return Object.entries(weeks).map(([week, km]) => ({ week, km: parseFloat(km.toFixed(1)) }));
   };
-
+ 
   const weeklyData = getWeeklyKm();
   const weightData = dailyLogs.filter(d => d.weight).map(d => ({ date: d.date, weight: d.weight }));
   const kcalData = dailyLogs.filter(d => d.kcal).map(d => ({ date: d.date, kcal: d.kcal, protein: d.protein }));
-
+ 
   const totalKm = runs.reduce((sum, r) => sum + r.distance, 0);
   const avgPace = runs.length > 0 ? runs.reduce((sum, r) => sum + calculatePace(r.distance, r.duration), 0) / runs.length : 0;
   const lastWeight = dailyLogs.filter(d => d.weight).slice(-1)[0]?.weight;
@@ -465,9 +649,12 @@ function HybridTracker() {
   const bestPace = recentRuns.length > 0 ? Math.min(...recentRuns.map(r => calculatePace(r.distance, r.duration))) : 0;
   const projected10k = bestPace * 10;
   const currentRange = getPaceRange(best5kTime, runForm.type);
-
+ 
+  // Helper: Split-Info finden
+  const getSplitInfo = (splitId) => splits.find(s => s.id === splitId) || { id: splitId, name: splitId, shortName: splitId, color: 'zinc' };
+ 
   if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center"><div className="text-zinc-400">Lade...</div></div>;
-
+ 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <header className="border-b border-zinc-800 bg-zinc-900/80 backdrop-blur sticky top-0 z-10" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
@@ -503,7 +690,7 @@ function HybridTracker() {
           ))}
         </nav>
       </header>
-
+ 
       <main className="max-w-6xl mx-auto px-4 py-4 pb-20">
         {activeTab === 'dashboard' && (
           <div className="space-y-4">
@@ -513,7 +700,7 @@ function HybridTracker() {
               <KPICard icon="scale" label="Gewicht" value={lastWeight ? lastWeight.toFixed(1) : '–'} unit="kg" color="blue" />
               <KPICard icon="trending" label="10K Proj." value={projected10k ? formatTime(projected10k) : '–'} unit="min" color="red" />
             </div>
-
+ 
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
               <div className="flex items-center justify-between mb-2">
                 <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Sub-40 Tracking</h2>
@@ -529,7 +716,7 @@ function HybridTracker() {
               </div>
               <p className="text-xs text-zinc-500 mt-2">5-km-Bestwert: {formatTime(best5kTime)} (Einstellungen)</p>
             </div>
-
+ 
             {runChartData.length > 0 && (
               <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
                 <h2 className="text-xs font-semibold text-zinc-400 uppercase mb-3">Pace-Entwicklung</h2>
@@ -544,7 +731,7 @@ function HybridTracker() {
                 </ResponsiveContainer>
               </div>
             )}
-
+ 
             {weeklyData.length > 0 && (
               <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
                 <h2 className="text-xs font-semibold text-zinc-400 uppercase mb-3">Wochen-Volumen (km)</h2>
@@ -559,7 +746,7 @@ function HybridTracker() {
                 </ResponsiveContainer>
               </div>
             )}
-
+ 
             {weightData.length > 0 && (
               <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
                 <h2 className="text-xs font-semibold text-zinc-400 uppercase mb-3">Gewichtsverlauf</h2>
@@ -574,7 +761,7 @@ function HybridTracker() {
                 </ResponsiveContainer>
               </div>
             )}
-
+ 
             {kcalData.length > 0 && (
               <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
                 <h2 className="text-xs font-semibold text-zinc-400 uppercase mb-3">Kalorien & Protein</h2>
@@ -591,7 +778,7 @@ function HybridTracker() {
                 </ResponsiveContainer>
               </div>
             )}
-
+ 
             {totalSessions === 0 && (
               <div className="bg-zinc-900 rounded-xl border border-zinc-800 border-dashed p-8 text-center">
                 <I name="activity" className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
@@ -600,7 +787,7 @@ function HybridTracker() {
             )}
           </div>
         )}
-
+ 
         {activeTab === 'run' && (
           <div className="space-y-4">
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
@@ -622,7 +809,7 @@ function HybridTracker() {
                     <option value="LongRun">Long Run</option>
                   </select>
                 </FormField>
-
+ 
                 <div className="bg-blue-500/5 border border-blue-500/20 rounded-lg p-3">
                   <div className="flex items-start gap-2">
                     <I name="info" className="w-4 h-4 text-blue-400 mt-0.5 flex-shrink-0" />
@@ -636,15 +823,23 @@ function HybridTracker() {
                     </div>
                   </div>
                 </div>
-
+ 
                 <div className="grid grid-cols-2 gap-3">
                   <FormField label="Distanz (km)">
-                    <input type="number" step="0.1" inputMode="decimal" value={runForm.distance} onChange={e => setRunForm({...runForm, distance: e.target.value})}
+                    <input type="text" inputMode="decimal" value={runForm.distance}
+                      onChange={e => {
+                        const v = e.target.value.replace(',', '.');
+                        if (/^\d*\.?\d*$/.test(v)) setRunForm({...runForm, distance: v});
+                      }}
                       className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full" placeholder="5.0" />
                   </FormField>
-                  <FormField label="Zeit (Min)">
-                    <input type="number" step="0.1" inputMode="decimal" value={runForm.duration} onChange={e => setRunForm({...runForm, duration: e.target.value})}
-                      className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full" placeholder="25.5" />
+                  <FormField label="Zeit (mm:ss)">
+                    <input type="text" inputMode="numeric" value={runForm.durationStr}
+                      onChange={e => {
+                        if (isValidTimeInput(e.target.value)) setRunForm({...runForm, durationStr: e.target.value});
+                      }}
+                      placeholder="25:30"
+                      className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full" />
                   </FormField>
                 </div>
                 <FormField label="Notizen">
@@ -652,9 +847,12 @@ function HybridTracker() {
                     className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full" rows="2" placeholder="Wetter, Gefühl..." />
                 </FormField>
               </div>
-
-              {runForm.distance && runForm.duration && (() => {
-                const actualPace = calculatePace(parseFloat(runForm.distance), parseFloat(runForm.duration));
+ 
+              {runForm.distance && runForm.durationStr && (() => {
+                const duration = parseTime(runForm.durationStr);
+                const dist = parseFloat(runForm.distance.replace(',', '.'));
+                if (!duration || !dist) return null;
+                const actualPace = calculatePace(dist, duration);
                 const tooFast = actualPace < currentRange.minPace;
                 const tooSlow = actualPace > currentRange.maxPace;
                 const inRange = !tooFast && !tooSlow;
@@ -673,7 +871,7 @@ function HybridTracker() {
                   </div>
                 );
               })()}
-
+ 
               <div className="mt-4 flex gap-2">
                 <button onClick={saveRun} className="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-5 py-2.5 rounded-lg flex-1">
                   {editingRunId ? 'Speichern' : 'Speichern'}
@@ -681,7 +879,7 @@ function HybridTracker() {
                 {editingRunId && <button onClick={cancelEditRun} className="bg-zinc-700 text-zinc-200 px-4 py-2.5 rounded-lg">Abbrechen</button>}
               </div>
             </div>
-
+ 
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
               <h2 className="text-base font-bold mb-3">Verlauf ({runs.length})</h2>
               <div className="space-y-2">
@@ -696,7 +894,7 @@ function HybridTracker() {
                       </div>
                       <div className="mt-1 flex items-baseline gap-2 text-sm flex-wrap">
                         <span className="font-semibold">{r.distance}km</span>
-                        <span className="text-zinc-400">{r.duration}min</span>
+                        <span className="text-zinc-400">{formatTime(r.duration)} min</span>
                         <span className="text-orange-500">{formatPace(calculatePace(r.distance, r.duration))}/km</span>
                       </div>
                     </div>
@@ -711,7 +909,7 @@ function HybridTracker() {
             </div>
           </div>
         )}
-
+ 
         {activeTab === 'strength' && (
           <div className="space-y-4">
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
@@ -726,14 +924,18 @@ function HybridTracker() {
                 <FormField label="Split">
                   <select value={strengthForm.type} onChange={e => setStrengthForm({...strengthForm, type: e.target.value})}
                     disabled={editingStrengthId !== null}
-                    className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full">
-                    <option value="UK">Unterkörper</option>
-                    <option value="OK">Oberkörper</option>
-                    <option value="Full">Ganzkörper</option>
+                    className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full disabled:opacity-60">
+                    {splits.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </FormField>
               </div>
-
+ 
+              {strengthForm.exerciseLog.length === 0 && (
+                <div className="mt-4 bg-yellow-500/5 border border-yellow-500/20 rounded-lg p-3 text-sm text-yellow-300">
+                  Für "{getSplitInfo(strengthForm.type).name}" sind noch keine Übungen hinterlegt. Lege Übungen im <button onClick={() => { setActiveTab('plan'); setEditingExerciseSplit(strengthForm.type); }} className="underline font-semibold">Wochenplan-Tab</button> an.
+                </div>
+              )}
+ 
               <div className="mt-4 space-y-3">
                 {strengthForm.exerciseLog.map((ex, exIdx) => (
                   <div key={exIdx} className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-800">
@@ -757,14 +959,19 @@ function HybridTracker() {
                       {ex.sets.map((s, setIdx) => (
                         <div key={setIdx} className="grid grid-cols-12 gap-1 items-center">
                           <div className="col-span-1 text-zinc-400 text-xs font-mono">{setIdx + 1}</div>
-                          <input type="number" inputMode="decimal" step="0.5" value={s.weight}
-                            onChange={e => updateSet(exIdx, setIdx, 'weight', e.target.value)}
+                          <input type="text" inputMode="decimal" value={s.weight}
+                            onChange={e => {
+                              const v = e.target.value.replace(',', '.');
+                              if (/^\d*\.?\d*$/.test(v)) updateSet(exIdx, setIdx, 'weight', v);
+                            }}
                             placeholder="kg" className="col-span-3 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm" />
                           <input type="text" value={s.reps}
                             onChange={e => updateSet(exIdx, setIdx, 'reps', e.target.value)}
                             placeholder={ex.repsTarget} className="col-span-3 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm" />
-                          <input type="number" inputMode="numeric" min="0" max="10" value={s.rir}
-                            onChange={e => updateSet(exIdx, setIdx, 'rir', e.target.value)}
+                          <input type="text" inputMode="numeric" value={s.rir}
+                            onChange={e => {
+                              if (/^\d{0,2}$/.test(e.target.value)) updateSet(exIdx, setIdx, 'rir', e.target.value);
+                            }}
                             placeholder="RIR" className="col-span-3 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm" />
                           <div className="col-span-2 flex justify-end">
                             {ex.sets.length > 1 && (
@@ -777,12 +984,12 @@ function HybridTracker() {
                   </div>
                 ))}
               </div>
-
+ 
               <FormField label="Notizen">
                 <textarea value={strengthForm.notes} onChange={e => setStrengthForm({...strengthForm, notes: e.target.value})}
                   className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full mt-3" rows="2" placeholder="Anmerkungen..." />
               </FormField>
-
+ 
               <div className="mt-4 flex gap-2">
                 <button onClick={saveStrength} className="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-5 py-2.5 rounded-lg flex-1">
                   {editingStrengthId ? 'Speichern' : 'Speichern'}
@@ -790,49 +997,52 @@ function HybridTracker() {
                 {editingStrengthId && <button onClick={cancelEditStrength} className="bg-zinc-700 text-zinc-200 px-4 py-2.5 rounded-lg">Abbrechen</button>}
               </div>
             </div>
-
+ 
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
               <h2 className="text-base font-bold mb-3">Verlauf ({strengthSessions.length})</h2>
               <div className="space-y-3">
-                {strengthSessions.slice().reverse().map(s => (
-                  <div key={s.id} className={`rounded-lg p-3 ${editingStrengthId === s.id ? 'bg-orange-500/10 border border-orange-500/40' : 'bg-zinc-800/50'}`}>
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`text-xs px-2 py-0.5 rounded ${s.type === 'UK' ? 'bg-blue-500/20 text-blue-400' : s.type === 'OK' ? 'bg-purple-500/20 text-purple-400' : 'bg-zinc-600/40'}`}>{s.type}</span>
-                        <span className="text-xs text-zinc-400">{s.date}</span>
+                {strengthSessions.slice().reverse().map(s => {
+                  const splitInfo = getSplitInfo(s.type);
+                  return (
+                    <div key={s.id} className={`rounded-lg p-3 ${editingStrengthId === s.id ? 'bg-orange-500/10 border border-orange-500/40' : 'bg-zinc-800/50'}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-0.5 rounded ${SPLIT_COLORS[splitInfo.color] || SPLIT_COLORS.zinc}`}>{splitInfo.shortName}</span>
+                          <span className="text-xs text-zinc-400">{s.date}</span>
+                        </div>
+                        <div className="flex gap-1">
+                          <button onClick={() => startEditStrength(s)} className="text-zinc-500 p-1"><I name="pencil" className="w-4 h-4" /></button>
+                          <button onClick={() => deleteItem(s.id, 'strength')} className="text-zinc-500 p-1"><I name="trash" className="w-4 h-4" /></button>
+                        </div>
                       </div>
-                      <div className="flex gap-1">
-                        <button onClick={() => startEditStrength(s)} className="text-zinc-500 p-1"><I name="pencil" className="w-4 h-4" /></button>
-                        <button onClick={() => deleteItem(s.id, 'strength')} className="text-zinc-500 p-1"><I name="trash" className="w-4 h-4" /></button>
-                      </div>
-                    </div>
-                    {s.exerciseLog && s.exerciseLog.length > 0 && (
-                      <div className="space-y-1">
-                        {s.exerciseLog.map((ex, i) => {
-                          const filledSets = ex.sets.filter(set => set.weight || set.reps);
-                          if (filledSets.length === 0) return null;
-                          return (
-                            <div key={i} className="text-xs">
-                              <div className="font-medium text-zinc-200">{ex.name}</div>
-                              <div className="text-zinc-400 font-mono ml-2">
-                                {filledSets.map((set, j) => (
-                                  <span key={j}>{j > 0 && ' · '}{set.weight || '–'}kg×{set.reps || '–'}{set.rir !== '' ? ` (RIR${set.rir})` : ''}</span>
-                                ))}
+                      {s.exerciseLog && s.exerciseLog.length > 0 && (
+                        <div className="space-y-1">
+                          {s.exerciseLog.map((ex, i) => {
+                            const filledSets = ex.sets.filter(set => set.weight || set.reps);
+                            if (filledSets.length === 0) return null;
+                            return (
+                              <div key={i} className="text-xs">
+                                <div className="font-medium text-zinc-200">{ex.name}</div>
+                                <div className="text-zinc-400 font-mono ml-2">
+                                  {filledSets.map((set, j) => (
+                                    <span key={j}>{j > 0 && ' · '}{set.weight || '–'}kg×{set.reps || '–'}{set.rir !== '' ? ` (RIR${set.rir})` : ''}</span>
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {s.notes && <p className="text-xs text-zinc-500 mt-1 italic">📝 {s.notes}</p>}
-                  </div>
-                ))}
+                            );
+                          })}
+                        </div>
+                      )}
+                      {s.notes && <p className="text-xs text-zinc-500 mt-1 italic">📝 {s.notes}</p>}
+                    </div>
+                  );
+                })}
                 {strengthSessions.length === 0 && <p className="text-zinc-500 text-sm">Noch keine Krafteinheiten.</p>}
               </div>
             </div>
           </div>
         )}
-
+ 
         {activeTab === 'daily' && (
           <div className="space-y-4">
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
@@ -846,19 +1056,23 @@ function HybridTracker() {
                 </FormField>
                 <div className="grid grid-cols-2 gap-3">
                   <FormField label="Gewicht (kg)">
-                    <input type="number" inputMode="decimal" step="0.1" value={dailyForm.weight} onChange={e => setDailyForm({...dailyForm, weight: e.target.value})}
+                    <input type="text" inputMode="decimal" value={dailyForm.weight}
+                      onChange={e => { const v = e.target.value.replace(',', '.'); if (/^\d*\.?\d*$/.test(v)) setDailyForm({...dailyForm, weight: v}); }}
                       className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full" placeholder="99.5" />
                   </FormField>
                   <FormField label="kcal">
-                    <input type="number" inputMode="numeric" value={dailyForm.kcal} onChange={e => setDailyForm({...dailyForm, kcal: e.target.value})}
+                    <input type="text" inputMode="numeric" value={dailyForm.kcal}
+                      onChange={e => { if (/^\d*$/.test(e.target.value)) setDailyForm({...dailyForm, kcal: e.target.value}); }}
                       className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full" placeholder="2400" />
                   </FormField>
                   <FormField label="Protein (g)">
-                    <input type="number" inputMode="numeric" value={dailyForm.protein} onChange={e => setDailyForm({...dailyForm, protein: e.target.value})}
+                    <input type="text" inputMode="numeric" value={dailyForm.protein}
+                      onChange={e => { if (/^\d*$/.test(e.target.value)) setDailyForm({...dailyForm, protein: e.target.value}); }}
                       className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full" placeholder="180" />
                   </FormField>
                   <FormField label="Schlaf (h)">
-                    <input type="number" inputMode="decimal" step="0.25" value={dailyForm.sleep} onChange={e => setDailyForm({...dailyForm, sleep: e.target.value})}
+                    <input type="text" inputMode="decimal" value={dailyForm.sleep}
+                      onChange={e => { const v = e.target.value.replace(',', '.'); if (/^\d*\.?\d*$/.test(v)) setDailyForm({...dailyForm, sleep: v}); }}
                       className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 w-full" placeholder="7.5" />
                   </FormField>
                 </div>
@@ -872,7 +1086,7 @@ function HybridTracker() {
                 {editingDailyId && <button onClick={cancelEditDaily} className="bg-zinc-700 text-zinc-200 px-4 py-2.5 rounded-lg">Abbrechen</button>}
               </div>
             </div>
-
+ 
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
               <h2 className="text-base font-bold mb-3">Verlauf ({dailyLogs.length})</h2>
               <div className="overflow-x-auto">
@@ -910,67 +1124,93 @@ function HybridTracker() {
             </div>
           </div>
         )}
-
+ 
         {activeTab === 'plan' && (
           <div className="space-y-4">
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
               <h2 className="text-base font-bold">Wochenplan</h2>
               <p className="text-xs text-zinc-500 mb-3">Tippe auf einen Tag zum Bearbeiten</p>
               <div className="grid grid-cols-1 gap-2">
-                {weeklyPlan.map((d, i) => <PlanDayCard key={i} day={d} idx={i} onUpdate={updatePlanDay} />)}
+                {weeklyPlan.map((d, i) => <PlanDayCard key={i} day={d} idx={i} splits={splits} onUpdate={updatePlanDay} />)}
               </div>
             </div>
-
+ 
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-              <h2 className="text-base font-bold mb-1">Übungsvorlagen</h2>
-              <p className="text-xs text-zinc-500 mb-3">Erscheinen automatisch im Kraft-Tab</p>
-              <div className="flex gap-2 mb-3">
-                {['UK', 'OK'].map(split => (
-                  <button key={split} onClick={() => setEditingExerciseSplit(editingExerciseSplit === split ? null : split)}
-                    className={`px-3 py-2 rounded-lg text-sm ${editingExerciseSplit === split ? 'bg-orange-500 text-white' : 'bg-zinc-800 text-zinc-300'}`}>
-                    {split === 'UK' ? 'Unterkörper' : 'Oberkörper'}
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="text-base font-bold">Trainingssplits & Übungen</h2>
+                <button onClick={addSplit} className="text-xs bg-orange-500 text-white px-3 py-1.5 rounded-lg flex items-center gap-1">
+                  <I name="plus" className="w-3.5 h-3.5" /> Neuer Split
+                </button>
+              </div>
+              <p className="text-xs text-zinc-500 mb-3">Übungen erscheinen automatisch im Kraft-Tab</p>
+ 
+              <div className="flex gap-2 mb-3 flex-wrap">
+                {splits.map(split => (
+                  <button key={split.id} onClick={() => setEditingExerciseSplit(editingExerciseSplit === split.id ? null : split.id)}
+                    className={`px-3 py-2 rounded-lg text-sm ${editingExerciseSplit === split.id ? 'bg-orange-500 text-white' : 'bg-zinc-800 text-zinc-300'}`}>
+                    {split.name}
                   </button>
                 ))}
               </div>
+ 
               {editingExerciseSplit && (
-                <div className="space-y-2">
-                  {(exercises[editingExerciseSplit] || []).map((ex, idx) => (
-                    <div key={idx} className="bg-zinc-800/50 rounded-lg p-2 space-y-1">
-                      <input type="text" value={ex.name}
-                        onChange={e => updateExercise(editingExerciseSplit, idx, 'name', e.target.value)}
-                        className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm w-full" />
-                      <div className="grid grid-cols-12 gap-1">
-                        <input type="number" inputMode="numeric" min="1" max="10" value={ex.sets}
-                          onChange={e => updateExercise(editingExerciseSplit, idx, 'sets', e.target.value)}
-                          className="col-span-3 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm" placeholder="Sätze" />
-                        <input type="text" value={ex.repsTarget}
-                          onChange={e => updateExercise(editingExerciseSplit, idx, 'repsTarget', e.target.value)}
-                          className="col-span-4 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm" placeholder="Wdh." />
-                        <input type="number" inputMode="numeric" min="0" max="10" value={ex.rirTarget}
-                          onChange={e => updateExercise(editingExerciseSplit, idx, 'rirTarget', e.target.value)}
-                          className="col-span-3 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm" placeholder="RIR" />
-                        <div className="col-span-2 flex justify-end gap-1">
-                          <button onClick={() => moveExercise(editingExerciseSplit, idx, -1)} className="text-zinc-500 text-xs">▲</button>
-                          <button onClick={() => moveExercise(editingExerciseSplit, idx, 1)} className="text-zinc-500 text-xs">▼</button>
-                          <button onClick={() => removeExercise(editingExerciseSplit, idx)} className="text-zinc-500"><I name="x" className="w-4 h-4" /></button>
+                <>
+                  <div className="flex items-center justify-between mb-2 p-2 bg-zinc-800/50 rounded-lg">
+                    <span className="text-sm text-zinc-300">
+                      <span className="text-zinc-500">Bearbeiten:</span> <span className="font-semibold">{getSplitInfo(editingExerciseSplit).name}</span>
+                    </span>
+                    <div className="flex gap-1">
+                      <button onClick={() => renameSplit(editingExerciseSplit)} className="text-xs text-zinc-400 hover:text-orange-500 px-2 py-1">
+                        Umbenennen
+                      </button>
+                      <button onClick={() => removeSplit(editingExerciseSplit)} className="text-xs text-zinc-400 hover:text-red-500 px-2 py-1">
+                        Löschen
+                      </button>
+                    </div>
+                  </div>
+ 
+                  <div className="space-y-2">
+                    {(exercises[editingExerciseSplit] || []).map((ex, idx) => (
+                      <div key={idx} className="bg-zinc-800/50 rounded-lg p-2 space-y-1">
+                        <input type="text" value={ex.name}
+                          onChange={e => updateExercise(editingExerciseSplit, idx, 'name', e.target.value)}
+                          className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm w-full" />
+                        <div className="grid grid-cols-12 gap-1">
+                          <input type="number" inputMode="numeric" min="1" max="10" value={ex.sets}
+                            onChange={e => updateExercise(editingExerciseSplit, idx, 'sets', e.target.value)}
+                            className="col-span-3 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm" placeholder="Sätze" />
+                          <input type="text" value={ex.repsTarget}
+                            onChange={e => updateExercise(editingExerciseSplit, idx, 'repsTarget', e.target.value)}
+                            className="col-span-4 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm" placeholder="Wdh." />
+                          <input type="number" inputMode="numeric" min="0" max="10" value={ex.rirTarget}
+                            onChange={e => updateExercise(editingExerciseSplit, idx, 'rirTarget', e.target.value)}
+                            className="col-span-3 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-sm" placeholder="RIR" />
+                          <div className="col-span-2 flex justify-end gap-1 items-center">
+                            <button onClick={() => moveExercise(editingExerciseSplit, idx, -1)} className="text-zinc-500 text-xs">▲</button>
+                            <button onClick={() => moveExercise(editingExerciseSplit, idx, 1)} className="text-zinc-500 text-xs">▼</button>
+                            <button onClick={() => removeExercise(editingExerciseSplit, idx)} className="text-zinc-500"><I name="x" className="w-4 h-4" /></button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                  <button onClick={() => addExercise(editingExerciseSplit)}
-                    className="w-full bg-zinc-800 text-zinc-300 text-sm py-2 rounded-lg flex items-center justify-center gap-2">
-                    <I name="plus" className="w-4 h-4" /> Übung hinzufügen
-                  </button>
-                </div>
+                    ))}
+                    {(exercises[editingExerciseSplit] || []).length === 0 && (
+                      <p className="text-xs text-zinc-500 text-center py-3">Noch keine Übungen. Lege welche an!</p>
+                    )}
+                    <button onClick={() => addExercise(editingExerciseSplit)}
+                      className="w-full bg-zinc-800 text-zinc-300 text-sm py-2 rounded-lg flex items-center justify-center gap-2">
+                      <I name="plus" className="w-4 h-4" /> Übung hinzufügen
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>
         )}
       </main>
-
+ 
       {showSettings && (
         <div className="fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setShowSettings(false)}>
-          <div className="bg-zinc-900 border border-zinc-800 rounded-t-xl sm:rounded-xl max-w-md w-full p-5" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}>
+          <div className="bg-zinc-900 border border-zinc-800 rounded-t-xl sm:rounded-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()} style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom))' }}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-bold">Einstellungen</h2>
               <button onClick={() => setShowSettings(false)} className="text-zinc-500"><I name="x" /></button>
@@ -1010,14 +1250,14 @@ function HybridTracker() {
           </div>
         </div>
       )}
-
+ 
       <footer className="border-t border-zinc-800 mt-8 py-4 text-center text-xs text-zinc-600" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
-        Hybrid Tracker v2.1 · Daten lokal in Safari
+        Hybrid Tracker v2.2 · Daten lokal in Safari
       </footer>
     </div>
   );
 }
-
+ 
 function KPICard({ icon, label, value, unit, color }) {
   const colors = { orange: 'text-orange-500 bg-orange-500/10', green: 'text-green-500 bg-green-500/10', blue: 'text-blue-500 bg-blue-500/10', red: 'text-red-500 bg-red-500/10' };
   return (
@@ -1031,7 +1271,7 @@ function KPICard({ icon, label, value, unit, color }) {
     </div>
   );
 }
-
+ 
 function FormField({ label, children }) {
   return (
     <div>
@@ -1040,8 +1280,8 @@ function FormField({ label, children }) {
     </div>
   );
 }
-
-function PlanDayCard({ day, idx, onUpdate }) {
+ 
+function PlanDayCard({ day, idx, splits, onUpdate }) {
   const [editing, setEditing] = useState(false);
   const colorClasses = {
     gray: 'bg-zinc-800/30 border-zinc-800',
@@ -1068,9 +1308,7 @@ function PlanDayCard({ day, idx, onUpdate }) {
           <select value={day.splitType || ''} onChange={e => onUpdate(idx, 'splitType', e.target.value || null)}
             className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs">
             <option value="">Kein Split</option>
-            <option value="UK">UK</option>
-            <option value="OK">OK</option>
-            <option value="Full">Ganzkörper</option>
+            {splits.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <select value={day.color} onChange={e => onUpdate(idx, 'color', e.target.value)}
             className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs">
@@ -1097,7 +1335,7 @@ function PlanDayCard({ day, idx, onUpdate }) {
     </div>
   );
 }
-
+ 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(<HybridTracker />);
 </script>
