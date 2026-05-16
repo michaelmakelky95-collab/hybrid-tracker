@@ -1,2 +1,2 @@
-# inex.html
+# hybrid-tracker
 Personal Hybrid Training Tracker 
